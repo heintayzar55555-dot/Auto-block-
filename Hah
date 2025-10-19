@@ -1,0 +1,614 @@
+
+
+-- Auto Block Rayfield Script (Full Features)
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local TweenService = game:GetService("TweenService")
+local RunService = game:GetService("RunService")
+local Players = game:GetService("Players")
+local lp = Players.LocalPlayer
+local PlayerGui = lp:WaitForChild("PlayerGui")
+local Humanoid, Animator
+local StarterGui  = game:GetService("StarterGui")
+local TestService = game:GetService("TestService")
+local ChatEvents = ReplicatedStorage:FindFirstChild("DefaultChatSystemChatEvents")
+local SayMessageRequest = ChatEvents and ChatEvents:FindFirstChild("SayMessageRequest")
+local testRemote = ReplicatedStorage:WaitForChild("Modules"):WaitForChild("Network"):WaitForChild("RemoteEvent")
+
+-- Place in ReplicatedFirst (LocalScript
+
+-- Continue script 
+
+local Rayfield = loadstring(game:HttpGet("https://sirius.menu/rayfield"))()
+local Window = Rayfield:CreateWindow({
+Name = "Auto Block Hub",
+LoadingTitle = "Auto Block Script",
+LoadingSubtitle = "by btz",
+ConfigurationSaving = {
+Enabled = true,
+FolderName = "AutoBlockHub",
+FileName = "Settings"
+},
+Discord = {Enabled = false},
+KeySystem = false
+})
+
+
+local NoticeTab = Window:CreateTab("Notice", 4483362458)
+local AutoBlockTab = Window:CreateTab("Auto Block", 4483362458)
+local BDTab = Window:CreateTab("Better Detection", 4483362458)
+local TechTab = Window:CreateTab("Techs", 4483362458)
+local PredictiveTab = Window:CreateTab("Predictive Auto Block", 4483362458)
+local FakeBlockTab = Window:CreateTab("Fake Block", 4483362458)
+local AutoPunchTab = Window:CreateTab("Auto Punch", 4483362458)
+local CustomAnimationsTab = Window:CreateTab("Custom Animations", 4483362458)
+local MiscTab = Window:CreateTab("Misc", 4483362458)
+
+
+
+-- IDs.
+local autoBlockTriggerSounds = {
+    ["102228729296384"] = true,
+    ["140242176732868"] = true,
+    ["112809109188560"] = true,
+    ["136323728355613"] = true,
+    ["115026634746636"] = true,
+    ["84116622032112"] = true,
+    ["108907358619313"] = true,
+    ["127793641088496"] = true,
+    ["86174610237192"] = true,
+    ["95079963655241"] = true,
+    ["101199185291628"] = true,
+    ["119942598489800"] = true,
+    ["84307400688050"] = true,
+    ["113037804008732"] = true,
+    ["105200830849301"] = true,
+    ["75330693422988"] = true,
+    ["82221759983649"] = true,
+    ["81702359653578"] = true,
+    ["108610718831698"] = true,
+    ["112395455254818"] = true,
+    ["109431876587852"] = true,
+    ["109348678063422"] = true,
+    ["85853080745515"] = true,
+    ["12222216"] = true,
+    ["105840448036441"] = true,
+    ["114742322778642"] = true,
+}
+
+-- Prevent repeated aim triggers for the same animation track
+local lastAimTrigger = {}   -- keys = AnimationTrack, value = timestamp when we triggered
+local AIM_WINDOW = 0.5      -- how long to aim (seconds)
+local AIM_COOLDOWN = 0.6    -- don't retrigger within this many seconds
+
+-- add once, outside the RenderStepped loop
+local _lastPunchMessageTime = _lastPunchMessageTime or 0
+local MESSAGE_PUNCH_COOLDOWN = 0.6 -- overall throttle (seconds)
+local _punchPrevPlaying = _punchPrevPlaying or {} -- persist between frames
+
+local _lastBlockMessageTime = _lastBlockMessageTime or 0
+local MESSAGE_BLOCK_COOLDOWN = 0.6 -- overall throttle (seconds)
+local _blockPrevPlaying = _blockPrevPlaying or {} -- persist between frames
+
+
+local autoBlockTriggerAnims = {
+    "126830014841198", "126355327951215", "121086746534252", "18885909645",
+    "98456918873918", "105458270463374", "83829782357897", "125403313786645",
+    "118298475669935", "82113744478546", "70371667919898", "99135633258223",
+    "97167027849946", "109230267448394", "139835501033932", "126896426760253",
+    "109667959938617", "126681776859538", "129976080405072", "121293883585738",
+    "81639435858902", "137314737492715",
+    "92173139187970"
+}
+
+-- State Variables
+local autoBlockOn = false
+local autoBlockAudioOn = false
+local doubleblocktech = false
+local looseFacing = true
+local detectionRange = 18
+local messageWhenAutoBlockOn = false
+local messageWhenAutoBlock = ""
+-- local fasterAudioAB = false (this is scrapped. im too lazy to remove it)
+local Debris = game:GetService("Debris")
+-- Anti-flick toggle state
+local antiFlickOn = false
+-- how many anti-flick parts to spawn (default 4)
+local antiFlickParts = 4
+
+-- optional: base distance in front of killer for the first part
+local antiFlickBaseOffset = 2.7
+
+-- optional: distance step between successive parts
+local antiFlickOffsetStep = 0
+
+local antiFlickDelay = 0 -- seconds to wait before parts spawn (default 0 = instant)
+local PRED_SECONDS_FORWARD = 0.25   -- seconds ahead for linear prediction
+local PRED_SECONDS_LATERAL  = 0.18  -- seconds ahead for lateral prediction
+local PRED_MAX_FORWARD      = 6     -- clamp (studs)
+local PRED_MAX_LATERAL      = 4     -- clamp (studs)
+local ANG_TURN_MULTIPLIER   = 0.6   -- how much angular velocity contributes to lateral offset
+local SMOOTHING_LERP        = 0.22  -- smoothing for sampled velocity/angular vel
+
+local killerState = {} -- [model] = { prevPos, prevLook, vel(Vector3), angVel(number) }
+
+-- prediction multiplier: 1.0 is normal, up to 10.0
+-- prediction multipliers
+local predictionStrength = 1        -- forward/lateral (1x .. 10x)
+local predictionTurnStrength = 1    -- turning strength (1x .. 10x)
+-- multiplier for blue block parts size (1.0 = default)
+local blockPartsSizeMultiplier = 1
+
+local autoAdjustDBTFBPS = false
+local _savedManualAntiFlickDelay = antiFlickDelay or 0 -- keep user's manual value when toggle is turned off
+
+-- map of killer name (lowercase) -> antiFlickDelay value you requested
+local killerDelayMap = {
+    ["c00lkidd"] = 0,
+    ["jason"]    = 0.013,
+    ["slasher"]  = 0.01,
+    ["1x1x1x1"]  = 0.15,
+    ["johndoe"]  = 0.33,
+    ["noli"]     = 0.15,
+}
+
+local predictiveBlockOn = false
+local edgeKillerDelay = 3
+local killerInRangeSince = nil
+local predictiveCooldown = 0
+
+local Dspeed = 5.6 -- you can tweak these numbers
+local Ddelay = 0
+
+local killerNames = {"c00lkidd", "Jason", "JohnDoe", "1x1x1x1", "Noli", "Slasher"}
+local autoPunchOn = false
+local messageWhenAutoPunchOn = false
+local messageWhenAutoPunch = ""
+local flingPunchOn = false
+local flingPower = 10000
+local hiddenfling = false
+local aimPunch = false
+
+local customBlockEnabled = false
+local customBlockAnimId = ""
+local customPunchEnabled = false
+local customPunchAnimId = ""
+
+local espEnabled = false
+local KillersFolder = workspace:WaitForChild("Players"):WaitForChild("Killers")
+
+local lastBlockTime = 0
+local lastPunchTime = 0
+
+
+local blockAnimIds = {
+"72722244508749",
+"96959123077498",
+"95802026624883"
+}
+local punchAnimIds = {
+"87259391926321",
+"140703210927645",
+"136007065400978",
+"136007065400978",
+"129843313690921",
+"129843313690921",
+"86709774283672",
+"87259391926321",
+"129843313690921",
+"129843313690921",
+"108807732150251",
+"138040001965654",
+"86096387000557",
+"86096387000557"
+}
+
+local chargeAnimIds = {
+    "106014898538300"
+}
+
+local customChargeEnabled = false
+local customChargeAnimId = ""
+local chargeAnimIds = { "106014898528300" }
+
+
+local cachedAnimator = nil
+local function refreshAnimator()
+    local char = lp.Character
+    if not char then
+        cachedAnimator = nil
+        return
+    end
+    local hum = char:FindFirstChildOfClass("Humanoid")
+    if hum then
+        local anim = hum:FindFirstChildOfClass("Animator")
+        cachedAnimator = anim or nil
+    else
+        cachedAnimator = nil
+    end
+end
+
+lp.CharacterAdded:Connect(function(char)
+    task.wait(0.5) -- allow Humanoid/Animator to be created
+    refreshAnimator()
+end)
+
+-- ===== performance improvements for Sound Auto Block =====
+-- cached UI / refs
+local cachedPlayerGui = PlayerGui
+local cachedPunchBtn, cachedBlockBtn, cachedCharges, cachedCooldown, cachedChargeBtn, cachedCloneBtn = nil, nil, nil, nil, nil, nil
+local detectionRangeSq = detectionRange * detectionRange
+
+local function refreshUIRefs()
+    -- ensure we have the most up-to-date references for MainUI and ability buttons
+    cachedPlayerGui = lp:FindFirstChild("PlayerGui") or PlayerGui
+    local main = cachedPlayerGui and cachedPlayerGui:FindFirstChild("MainUI")
+    if main then
+        local ability = main:FindFirstChild("AbilityContainer")
+        cachedPunchBtn = ability and ability:FindFirstChild("Punch")
+        cachedBlockBtn = ability and ability:FindFirstChild("Block")
+        cachedChargeBtn = ability and ability:FindFirstChild("Charge")
+        cachedCloneBtn = ability and ability:FindFirstChild("Clone")
+        cachedCharges = cachedPunchBtn and cachedPunchBtn:FindFirstChild("Charges")
+        cachedCooldown = cachedBlockBtn and cachedBlockBtn:FindFirstChild("CooldownTime")
+    else
+        cachedPunchBtn, cachedBlockBtn, cachedCharges, cachedCooldown, cachedChargeBtn, cachedCloneBtn = nil, nil, nil, nil, nil, nil
+    end
+end
+
+-- call once at startup
+refreshUIRefs()
+
+-- refresh on GUI or character changes (keeps caches fresh)
+if cachedPlayerGui then
+    cachedPlayerGui.ChildAdded:Connect(function(child)
+        if child.Name == "MainUI" then
+            task.delay(0.02, refreshUIRefs)
+        end
+    end)
+end
+
+lp.CharacterAdded:Connect(function()
+    task.delay(0.5, refreshUIRefs)
+end)
+
+NoticeTab:CreateParagraph({
+    Title = "welcome",
+    Content = "thanks for using my wonderful auto block script"
+})
+
+NoticeTab:CreateParagraph({
+    Title = "",
+    Content = "some features may only work with guest skins thats using the default anims"
+})
+
+NoticeTab:CreateParagraph({
+    Title = "",
+    Content = ".gg/Tmby2GkKJR"
+})
+
+-- GUI Toggles
+AutoBlockTab:CreateToggle({
+Name = "Auto Block (Animation)",
+CurrentValue = false,
+Flag = "AutoBlockAnimation",
+Callback = function(Value) autoBlockOn = Value end
+})
+
+-- Rayfield toggle for Auto Block (Audio)
+AutoBlockTab:CreateToggle({
+    Name = "Auto Block (Audio)",
+    CurrentValue = false,
+    Flag = "AutoBlockAudio",
+    Callback = function(state)
+        autoBlockAudioOn = state
+    end,
+})
+
+-- make sure AutoBlockTab is a valid Rayfield tab object
+local autoblocktype = "Block"
+
+local StarterGui = game:GetService("StarterGui")
+
+-- simple notification
+local function SendNotif(title, text, duration)
+    StarterGui:SetCore("SendNotification", {
+        Title = title or "Hello",
+        Text = text or "hi",
+        Duration = duration or 4 -- seconds
+    })
+end
+
+AutoBlockTab:CreateButton({
+    Name = "Change auto block type",
+    Callback = function()
+        if autoblocktype == "Block" then
+            autoblocktype = "Charge"
+            SendNotif("changed auto block type", "CHARGE", 4)
+        elseif autoblocktype == "Charge" then
+            autoblocktype = "7n7 Clone"
+            SendNotif("changed auto block type", "7N7 CLONE", 4)
+        elseif autoblocktype == "7n7 Clone" then
+            autoblocktype = "Block"
+            SendNotif("changed auto block type", "BLOCK", 4)
+        end
+    end,
+})
+
+--AutoBlockTab:CreateToggle({
+--    Name = "Faster Audio AB (only uses detection range)",
+--    CurrentValue = false,
+--    Flag = "FasterAudioAB",
+--    Callback = function(state)
+--        fasterAudioAB = state
+--    end,
+--})
+
+AutoBlockTab:CreateParagraph({
+    Title = "Recomendation",
+    Content = "use audio auto block and use 20 range for it"
+})
+
+AutoBlockTab:CreateToggle({
+Name = "Message When Blocking",
+CurrentValue = false,
+Flag = "MessageWhenBlockToggle",
+Callback = function(Value) messageWhenAutoBlockOn = Value end
+})
+
+AutoBlockTab:CreateInput({
+    Name = "Message when blocking",
+    PlaceholderText = "im gonna block ya",
+    RemoveTextAfterFocusLost = false,
+    Flag = "MessageWhenBlockText",
+    Callback = function(Text) messageWhenAutoBlock = Text end
+})
+
+AutoBlockTab:CreateParagraph({
+    Title = "notice",
+    Content = "face check delays on coolkid, dont use face check agaisnt coolkid."
+})
+
+local facingCheckEnabled = true
+local customFacingDot = -0.3
+
+AutoBlockTab:CreateToggle({
+    Name = "Enable Facing Check",
+    CurrentValue = true,
+    Flag = "FacingCheckToggle",
+    Callback = function(Value)
+        facingCheckEnabled = Value
+    end
+})
+
+
+
+local function isFacing(localRoot, targetRoot)
+    if not facingCheckEnabled then
+        return true
+    end
+
+    local dir = (localRoot.Position - targetRoot.Position).Unit
+    local dot = targetRoot.CFrame.LookVector:Dot(dir)
+    return looseFacing and dot > customFacingDot
+end
+
+-- Optimized facing check
+local function isFacing(localRoot, targetRoot)
+    -- fast global reads
+    local enabled = facingCheckEnabled
+    if not enabled then return true end
+
+    local loose = looseFacing
+
+    -- difference vector (one allocation, unavoidable)
+    local dx = localRoot.Position.X - targetRoot.Position.X
+    local dy = localRoot.Position.Y - targetRoot.Position.Y
+    local dz = localRoot.Position.Z - targetRoot.Position.Z
+
+    -- magnitude (sqrt) once; handle zero-distance safely
+    local mag = math.sqrt(dx*dx + dy*dy + dz*dz)
+    if mag == 0 then
+        -- if positions coincide treat as "facing" (matches permissive behavior)
+        return true
+    end
+    local invMag = 1 / mag
+
+    -- unit direction components (no new Vector3 allocation)
+    local ux, uy, uz = dx * invMag, dy * invMag, dz * invMag
+
+    -- cache look vector components
+    local lv = targetRoot.CFrame.LookVector
+    local lx, ly, lz = lv.X, lv.Y, lv.Z
+
+    -- dot product (fast scalar math)
+    local dot = lx * ux + ly * uy + lz * uz
+
+    -- same logic as original, but explicit for clarity/branch prediction
+    return dot > (customFacingDot or -0.3)
+end
+
+-- ===== Facing Check Visual (fixed) =====
+local facingVisualOn = false
+local facingVisuals = {} -- [killer] = visual
+
+local function updateFacingVisual(killer, visual)
+    if not (killer and visual and visual.Parent) then return end
+    local hrp = killer:FindFirstChild("HumanoidRootPart")
+    if not hrp then return end
+
+    -- calculate angle from DOT threshold (safe-clamp)
+    local dot = math.clamp(customFacingDot or -0.3, -1, 1)
+    local angle = math.acos(dot)              -- radians, 0..pi
+    local frac = angle / math.pi              -- 0..1 (0 = very narrow cone, 1 = very wide)
+
+    -- scale radius between a small fraction and full detectionRange
+    local minFrac = 0.20                      -- tune: smallest disc is 20% of detectionRange
+    local radius = math.max(1, detectionRange * (minFrac + (1 - minFrac) * frac))
+    visual.Radius = radius
+    visual.Height = 0.12
+
+    -- place the disc in front of the killer; move slightly less forward for narrow cones
+    local forwardDist = detectionRange * (0.35 + 0.15 * frac) -- tune if you like
+    local yOffset = -(hrp.Size.Y / 2 + 0.05)
+    visual.CFrame = CFrame.new(0, yOffset, -forwardDist) * CFrame.Angles(math.rad(90), 0, 0)
+
+    -- determine local player's HRP and whether they are inside range & facing
+    local myRoot = lp.Character and lp.Character:FindFirstChild("HumanoidRootPart")
+    local inRange = false
+    local facingOkay = false
+
+    if myRoot and hrp then
+        local dist = (hrp.Position - myRoot.Position).Magnitude
+        inRange = dist <= detectionRange
+        facingOkay = (not facingCheckEnabled) or (type(isFacing) == "function" and isFacing(myRoot, hrp))
+    end
+
+    -- color / transparency
+    if inRange and facingOkay then
+        visual.Color3 = Color3.fromRGB(0, 255, 0)
+        visual.Transparency = 0.40
+    else
+        visual.Color3 = Color3.fromRGB(255, 255, 0) -- show yellow when not both conditions
+        visual.Transparency = 0.85
+    end
+end
+
+local function addFacingVisual(killer)
+    if not killer or not killer:IsA("Model") then return end
+    if facingVisuals[killer] then return end
+    local hrp = killer:FindFirstChild("HumanoidRootPart")
+    if not hrp then return end
+
+    local visual = Instance.new("CylinderHandleAdornment")
+    visual.Name = "FacingCheckVisual"
+    visual.Adornee = hrp
+    visual.AlwaysOnTop = true
+    visual.ZIndex = 2
+    visual.Transparency = 0.55
+    visual.Color3 = Color3.fromRGB(0, 255, 0) -- green
+
+    visual.Parent = hrp
+    facingVisuals[killer] = visual
+
+    -- initialize placement immediately
+    updateFacingVisual(killer, visual)
+end
+
+local function removeFacingVisual(killer)
+    local v = facingVisuals[killer]
+    if v then
+        v:Destroy()
+        facingVisuals[killer] = nil
+    end
+end
+
+local function refreshFacingVisuals()
+    for _, k in ipairs(KillersFolder:GetChildren()) do
+        if facingVisualOn then
+            -- make sure HRP exists before creating
+            local hrp = k:FindFirstChild("HumanoidRootPart") or k:WaitForChild("HumanoidRootPart", 5)
+            if hrp then addFacingVisual(k) end
+        else
+            removeFacingVisual(k)
+        end
+    end
+end
+
+-- keep visuals in sync every frame (ensures size/mode changes apply immediately)
+RunService.RenderStepped:Connect(function()
+    for killer, visual in pairs(facingVisuals) do
+        -- if the killer was removed/died, clean up
+        if not killer.Parent or not killer:FindFirstChild("HumanoidRootPart") then
+            removeFacingVisual(killer)
+        else
+            updateFacingVisual(killer, visual)
+        end
+    end
+end)
+
+-- Keep visuals for newly added/removed killers
+KillersFolder.ChildAdded:Connect(function(killer)
+    if facingVisualOn then
+        task.spawn(function()
+            local hrp = killer:WaitForChild("HumanoidRootPart", 5)
+            if hrp then addFacingVisual(killer) end
+        end)
+    end
+end)
+KillersFolder.ChildRemoved:Connect(function(killer) removeFacingVisual(killer) end)
+
+-- toggle in GUI (keeps behaviour with dropdown)
+AutoBlockTab:CreateToggle({
+    Name = "Facing Check Visual",
+    CurrentValue = false,
+    Flag = "FacingCheckVisualToggle",
+    Callback = function(state)
+        facingVisualOn = state
+        refreshFacingVisuals()
+    end
+})
+
+AutoBlockTab:CreateParagraph({
+    Title = "letsgo",
+    Content = "facing check visual not being accurate is because its just there to give u an idea of the facing check"
+})
+
+AutoBlockTab:CreateInput({
+Name = "Facing Check angle (DOT)",
+PlaceholderText = "-0.3",
+RemoveTextAfterFocusLost = false,
+Flag = "Facingcheckdot",
+Callback = function(Text)
+customFacingDot = tonumber(Text) or customFacingDot
+end
+})
+
+AutoBlockTab:CreateParagraph({
+    Title = "DOT explanation",
+    Content = "if for example you put it 0 you will need to be EXACTLY infront of the killer. but you can make the facing check cone larger by making it -0.3 or -0.5 if you put -1 is going to be a half circle cone infront the killer, so yeah."
+})
+
+AutoBlockTab:CreateInput({
+Name = "Detection Range",
+PlaceholderText = "18",
+RemoveTextAfterFocusLost = false,
+Flag = "DetectionRange",
+Callback = function(Text)
+detectionRange = tonumber(Text) or detectionRange
+detectionRangeSq = detectionRange * detectionRange
+end
+})
+
+
+-- ===== Facing Check Visual (paste after detectionCircles / addKillerCircle) =====
+local detectionCircles = {} -- store all killer circles
+local killerCirclesVisible = false
+
+-- Function to add circle to a killer
+-- replace your addKillerCircle with this
+local function addKillerCircle(killer)
+    if not killer:FindFirstChild("HumanoidRootPart") then return end
+    if detectionCircles[killer] then return end
+
+    local hrp = killer.HumanoidRootPart
+    local circle = Instance.new("CylinderHandleAdornment")
+    circle.Name = "KillerDetectionCircle"
+    circle.Adornee = hrp
+    circle.Color3 = Color3.fromRGB(255, 0, 0)
+    circle.AlwaysOnTop = true
+    circle.ZIndex = 1
+    circle.Transparency = 0.6
+    circle.Radius = detectionRange            -- <- use detectionRange exactly
+    circle.Height = 0.12                      -- thin disc
+    -- place the disc at the feet of the HumanoidRootPart (CFrame is relative to Adornee)
+    local yOffset = -(hrp.Size.Y / 2 + 0.05)  -- a little below HRP origin
+    circle.CFrame = CFrame.new(0, yOffset, 0) * CFrame.Angles(math.rad(90), 0, 0)
+    circle.Parent = hrp
+
+    detectionCircles[killer] = circle
+end
+
+-- Update radius when detectionRange changes (and on render)
+
+
+-- Function to remove circle from a kille
