@@ -1482,7 +1482,7 @@ RunService.RenderStepped:Connect(function()
             billboard.ESP_Text.Text = string.format("%s\n[%d]", killer.Name, dist)
         end
     end
-end)
+eend
 
 MiscTab:CreateToggle({
     Name = "Killer ESP",
@@ -1493,13 +1493,17 @@ MiscTab:CreateToggle({
         refreshESP()
     end,
 })
-lolcal fireRilitylitilityock(fireRemotePunchty", "Block"}
-ReplicatedStorage:WaitForChild("Modules"):WaitForChild("Network"):WaitForChild("RemoteEvent"):FireServer(unpaclolction fireRemotePunch()
-local args = {"UseActorAbility", "Punch"}
+
+--Helpers
+local function fireRemoteBlock()
+local args = {"UseActorAbility", "Block"}
 ReplicatedStorage:WaitForChild("Modules"):WaitForChild("Network"):WaitForChild("RemoteEvent"):FireServer(unpack(args))
 end
 
-
+local function fireRemotePunch()
+local args = {"UseActorAbility", "Punch"}
+ReplicatedStorage:WaitForChild("Modules"):WaitForChild("Network"):WaitForChild("RemoteEvent"):FireServer(unpack(args))
+end
 
 -- replace existing playCustomAnim with this
 local function playCustomAnim(animId, isPunch)
