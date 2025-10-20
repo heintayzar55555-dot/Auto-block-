@@ -1184,8 +1184,7 @@ local controlChargeEnabled = false
 local controlChargeActive = false
 local overrideConnection = nil
 
--- Save/restore for humanoid original values
-local savedHumanoidState = {}
+-- Save/restore for humanoid original valuemanoidState = {}
 
 local function getHumanoid()
     if not lp or not lp.Character then return nil end
@@ -1494,26 +1493,8 @@ MiscTab:CreateToggle({
         refreshESP()
     end,
 })
-
-MiscTab:CreateToggle({
-    Name = "Killer ESP",
-    Callback = function()
-       espEnabled = not espEnabled
-       if espEnabled then
-           loadstring(game:HttpGet("https://raw.githubusercontent.com/VapeVoidware/VW-Add/main/forsaken.lua", true))()
-           Rayfield:Notify({
-               Title = "ESP Enabled",
-               Content = "Killer & Survivor ESP activated!",
-               Duration = 3,
-               Image = 4483362458,
-           })
-       else
-local function fireRemoteBlock()
-local args = {"UseActorAbility", "Block"}
-ReplicatedStorage:WaitForChild("Modules"):WaitForChild("Network"):WaitForChild("RemoteEvent"):FireServer(unpack(args))
-end
-
-local function fireRemotePunch()
+lolcal fireRilitylitilityock(fireRemotePunchty", "Block"}
+ReplicatedStorage:WaitForChild("Modules"):WaitForChild("Network"):WaitForChild("RemoteEvent"):FireServer(unpaclolction fireRemotePunch()
 local args = {"UseActorAbility", "Punch"}
 ReplicatedStorage:WaitForChild("Modules"):WaitForChild("Network"):WaitForChild("RemoteEvent"):FireServer(unpack(args))
 end
